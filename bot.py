@@ -127,11 +127,12 @@ async def start_bot():
 def main():
     import asyncio
 
-    asyncio.run(start_bot())
+    async def runner():
+        await start_bot()
+        Thread(target=run_flask, daemon=True).start()
+        await asyncio.Event().wait()
 
-    Thread(target=run_flask, daemon=True).start()
-
-    asyncio.get_event_loop().run_forever()
+    asyncio.run(runner())
 
 
 if __name__ == "__main__":
