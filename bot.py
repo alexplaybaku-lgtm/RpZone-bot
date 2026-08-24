@@ -1,5 +1,7 @@
 import os
+import asyncio
 from threading import Thread
+
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,6 +18,8 @@ ADMIN_ID = 6754793977
 PORT = int(os.environ.get("PORT", 10000))
 RENDER_URL = os.environ["RENDER_EXTERNAL_URL"]
 
+MAIN_LOOP = None
+
 app = Flask(__name__)
 
 telegram_app = Application.builder().token(BOT_TOKEN).build()
@@ -30,6 +34,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    message = update.message
 
     username = f"@{user.username}" if user.username else "нет username"
 
@@ -38,7 +43,7 @@ async def user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 Имя: {user.full_name}\n"
         f"🔹 Username: {username}\n"
         f"🆔 ID: {user.id}\n\n"
-        f"💬 Сообщение:\n{update.message.text}"
+        f"💬 Сообщение:\n{message.text}"
     )
 
     keyboard = [[
@@ -54,7 +59,7 @@ async def user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
-    await update.message.reply_text("✅ Сообщение отправлено!")
+    await message.reply_text("✅ Сообщение отправлено!")
 
 
 async def reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,18 +97,33 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(reply_button))
+
 telegram_app.add_handler(
-    MessageHandler(filters.TEXT & filters.User(ADMIN_ID), admin_reply)
+    MessageHandler(
+        filters.TEXT & filters.User(ADMIN_ID),
+        admin_reply
+    )
 )
+
 telegram_app.add_handler(
-    MessageHandler(filters.TEXT & ~filters.User(ADMIN_ID), user_message)
+    MessageHandler(
+        filters.TEXT & ~filters.User(ADMIN_ID),
+        user_message
+    )
 )
 
 
 @app.route("/telegram", methods=["POST"])
 def telegram_webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.update_queue.put_nowait(update)
+    data = request.get_json(force=True)
+    update = Update.de_json(data, telegram_app.bot)
+
+    if MAIN_LOOP is not None:
+        asyncio.run_coroutine_threadsafe(
+            telegram_app.update_queue.put(update),
+            MAIN_LOOP
+        )
+
     return "OK"
 
 
@@ -113,29 +133,45 @@ def home():
 
 
 def run_flask():
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(
+        host="0.0.0.0",
+        port=PORT
+    )
 
 
 async def start_bot():
     await telegram_app.initialize()
     await telegram_app.start()
-    await telegram_app.bot.delete_webhook(drop_pending_updates=True)
+
+    await telegram_app.bot.delete_webhook(
+        drop_pending_updates=True
+    )
+
     await telegram_app.bot.set_webhook(
         url=f"{RENDER_URL}/telegram",
         drop_pending_updates=True
     )
-    print(f"Webhook set to: {RENDER_URL}/telegram")
 
-
-
+    print(
+        f"Webhook set to: {RENDER_URL}/telegram"
+    )
 
 
 def main():
-    import asyncio
+    global MAIN_LOOP
 
     async def runner():
+        global MAIN_LOOP
+
+        MAIN_LOOP = asyncio.get_running_loop()
+
         await start_bot()
-        Thread(target=run_flask, daemon=True).start()
+
+        Thread(
+            target=run_flask,
+            daemon=True
+        ).start()
+
         await asyncio.Event().wait()
 
     asyncio.run(runner())
@@ -143,3 +179,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+        
