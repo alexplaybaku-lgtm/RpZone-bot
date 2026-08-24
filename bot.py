@@ -119,9 +119,15 @@ def run_flask():
 async def start_bot():
     await telegram_app.initialize()
     await telegram_app.start()
+    await telegram_app.bot.delete_webhook(drop_pending_updates=True)
     await telegram_app.bot.set_webhook(
-        url=f"{RENDER_URL}/telegram"
+        url=f"{RENDER_URL}/telegram",
+        drop_pending_updates=True
     )
+    print(f"Webhook set to: {RENDER_URL}/telegram")
+
+
+
 
 
 def main():
